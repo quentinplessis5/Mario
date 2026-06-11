@@ -183,13 +183,14 @@ export class Effects {
     }
 
     // 3) Integrate live particles (light gravity, fade + shrink out).
-    for (const p of this.particles) {
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
       if (p.life <= 0) continue;
       p.life -= frameDt;
       if (p.life <= 0) {
         p.life = 0;
         p.sprite.visible = false;
-        this.free.push(this.particles.indexOf(p));
+        this.free.push(i);
         continue;
       }
       p.velocity.y -= p.gravity * frameDt;
