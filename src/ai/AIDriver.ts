@@ -252,15 +252,8 @@ export class AIDriver {
 
     input.throttle = throttle;
     input.steer = steer;
-    input.useItem =
-      kart.heldItem !== null || this.hasPendingItemPress(kart)
-        ? this.itemUser.update(kart, index, karts, curv.totalTurn, dt)
-        : this.itemUser.update(kart, index, karts, curv.totalTurn, dt);
-  }
-
-  /** The item user also tracks timers when no item is held. */
-  private hasPendingItemPress(_kart: KartState): boolean {
-    return true;
+    // AIItemUser also runs with no held item: it tracks timers and hold ticks.
+    input.useItem = this.itemUser.update(kart, index, karts, curv.totalTurn, dt);
   }
 
   /**
