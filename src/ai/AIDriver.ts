@@ -7,6 +7,7 @@ import { TUNING } from '../config/tuning';
 import { angleDiff, clamp, mod, randRange } from '../core/MathUtils';
 import { AIItemUser } from './AIItemUser';
 import {
+  cornerSpeedLimit,
   createCurvatureSample,
   measureCurvature,
   offsetLimit,
@@ -22,16 +23,8 @@ import {
  * AIItemUser (item button decisions). Nothing else should import them.
  */
 
-/** Curvature above which the AI slows down (rad over the next 30 m). */
-const SLOW_TURN_THRESHOLD = 0.5;
-/** Speed above which a SLOW_TURN corner triggers a lifted throttle. */
-const SLOW_TURN_SPEED = 22;
-/** Harder corner: brake briefly above this speed. */
-const BRAKE_TURN_THRESHOLD = 0.9;
-const BRAKE_TURN_SPEED = 26;
-
 /** Drift engage/release thresholds on the signed upcoming turn (hysteresis). */
-const DRIFT_ENGAGE_TURN = 0.6;
+const DRIFT_ENGAGE_TURN = 0.8;
 const DRIFT_RELEASE_TURN = 0.25;
 /** Max curvature on the "wrong" side for the turn to count as one-sided. */
 const DRIFT_SIDE_TOLERANCE = 0.25;
@@ -59,7 +52,17 @@ interface DriverState {
   /** Steering noise oscillator parameters (unique per AI). */
   noisePhase: number;
   noiseFreq: number;
+  /** Seconds spent at ~zero speed (wall pin detection). */
+  stuckTimer: number;
+  /** While > 0 the AI reverses to free itself from a wall/pile-up. */
+  recoveryTimer: number;
 }
+
+/** Speed below which a racing AI is considered possibly stuck. */
+const STUCK_SPEED = 2;
+/** Stuck duration that triggers a reverse recovery, and its length. */
+const STUCK_TRIGGER_TIME = 1.2;
+const RECOVERY_DURATION = 1.1;
 
 const NEUTRAL: Readonly<KartInput> = { throttle: 0, steer: 0, drift: false, useItem: false };
 
@@ -95,6 +98,8 @@ export class AIDriver {
       s.offset = 0;
       s.offsetTimer = 0;
       s.drifting = false;
+      s.stuckTimer = 0;
+      s.recoveryTimer = 0;
       // skill / noise parameters are personality traits: kept across resets.
     }
     this.itemUser.reset();
@@ -144,6 +149,8 @@ export class AIDriver {
         skill: randRange(0.85, 1),
         noisePhase: i * 1.7 + randRange(0, Math.PI * 2),
         noiseFreq: randRange(0.5, 0.9),
+        stuckTimer: 0,
+        recoveryTimer: 0,
       });
       this.inputs.push({ throttle: 0, steer: 0, drift: false, useItem: false });
       this.speedMultipliers.push(1);
@@ -207,6 +214,7 @@ export class AIDriver {
     // (b) Hazard avoidance: dodge static bananas and shells sitting on the
     // upcoming stretch of road.
     offset = this.avoidProjectiles(kart, projectiles, offset, limit, lookahead);
+    offset = this.avoidKarts(kart, karts, offset, limit, lookahead);
 
     // (c) Steering toward the offset target point.
     scratchTargetPos.addScaledVector(scratchTargetRight, offset);
@@ -220,13 +228,36 @@ export class AIDriver {
       Math.sin(this.time * state.noiseFreq + state.noisePhase) * STEER_NOISE_AMPLITUDE;
     let steer = clamp(headingError * ai.steerGain * state.skill + noise, -1, 1);
 
-    // (d) Throttle from the upcoming curvature.
+    // Stuck recovery: a kart pinned against a wall (or a pile-up) at ~zero
+    // speed backs out for a moment, reverse-steering its nose toward the
+    // target, then resumes normal driving.
+    if (state.recoveryTimer > 0) {
+      state.recoveryTimer -= dt;
+      input.throttle = -1;
+      input.steer = headingError > 0 ? -1 : 1;
+      input.drift = false;
+      state.drifting = false;
+      return;
+    }
+    if (Math.abs(kart.speed) < STUCK_SPEED && kart.spinTimer <= 0 && !kart.finished) {
+      state.stuckTimer += dt;
+      if (state.stuckTimer > STUCK_TRIGGER_TIME) {
+        state.stuckTimer = 0;
+        state.recoveryTimer = RECOVERY_DURATION;
+      }
+    } else {
+      state.stuckTimer = 0;
+    }
+
+    // (d) Throttle: keep the speed under the curvature-derived limit, with
+    // braking distance taken into account (see RacingLine.cornerSpeedLimit).
     const curv = measureCurvature(this.track, kart.splineHint, this.curvature);
+    const vLimit = cornerSpeedLimit(this.track, kart.splineHint);
     let throttle = state.skill; // skill caps top throttle
-    if (curv.totalTurn > BRAKE_TURN_THRESHOLD && kart.speed > BRAKE_TURN_SPEED) {
-      throttle = -0.3; // brief brake into a hard corner
-    } else if (curv.totalTurn > SLOW_TURN_THRESHOLD && kart.speed > SLOW_TURN_SPEED) {
-      throttle = 0.3;
+    if (kart.speed > vLimit + 2) {
+      throttle = -0.5; // brake hard, we are way too fast for what is coming
+    } else if (kart.speed > vLimit) {
+      throttle = 0; // coast down to the limit
     }
 
     // (e) Drift on sustained one-sided corners, with hysteresis so the AI
@@ -287,6 +318,39 @@ export class AIDriver {
 
       if (Math.abs(lateral - offset) < AVOID_LATERAL_RANGE) {
         // Dodge to the opposite side of the hazard, clamped to the road.
+        const side = offset <= lateral ? -1 : 1;
+        offset = clamp(lateral + side * AVOID_DODGE_OFFSET, -limit, limit);
+      }
+    }
+    return offset;
+  }
+
+  /**
+   * Steers around clearly slower karts ahead instead of bulldozing through
+   * them (matters most at the start, when a kart launches late).
+   */
+  private avoidKarts(
+    kart: KartState,
+    karts: KartState[],
+    offset: number,
+    limit: number,
+    lookahead: number,
+  ): number {
+    const total = this.track.totalLength;
+    const maxAhead = lookahead + AVOID_EXTRA_AHEAD;
+
+    for (let i = 0; i < karts.length; i++) {
+      const other = karts[i];
+      if (other.id === kart.id) continue;
+      if (other.speed > kart.speed - 3) continue; // only clearly slower karts
+
+      const ahead = mod(other.splineHint - kart.splineHint, total);
+      if (ahead < AVOID_MIN_AHEAD || ahead > maxAhead) continue;
+
+      const s = this.track.sampleAtDistance(other.splineHint);
+      const lateral = scratchDelta.copy(other.position).sub(s.position).dot(s.right);
+
+      if (Math.abs(lateral - offset) < AVOID_LATERAL_RANGE) {
         const side = offset <= lateral ? -1 : 1;
         offset = clamp(lateral + side * AVOID_DODGE_OFFSET, -limit, limit);
       }

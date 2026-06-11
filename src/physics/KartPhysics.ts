@@ -15,6 +15,8 @@ const VISUAL_SLIP_LAMBDA = 8;
 const VISUAL_SLIP_MAX = 0.45;
 /** Turn-rate falloff per m/s above turnSpeedPeak (bell curve right side). */
 const HIGH_SPEED_TURN_FALLOFF = 0.04;
+/** Fraction of turnRate available while throttling at (near) standstill. */
+const LOW_SPEED_TURN_FLOOR = 0.45;
 
 // Scratch vectors (single-threaded fixed-step simulation, no allocation per tick).
 const FORWARD = new THREE.Vector3();
@@ -126,14 +128,22 @@ export class KartPhysics {
     vLateral *= Math.exp(-grip * dt);
 
     // (h)/(i) Heading: the drift controller owns it while a drift is active,
-    // otherwise a bell-curve steering response (no turning at standstill,
-    // peak agility around turnSpeedPeak, gentle falloff at high speed).
+    // otherwise a bell-curve steering response (peak agility around
+    // turnSpeedPeak, gentle falloff at high speed). While throttling from a
+    // (near) standstill the kart can still pivot — otherwise a kart pinned
+    // nose-first against a wall could never recover (turn rate would be 0).
     const drifting = this.drift.update(kart, driftHeld, steer, vForward, dt);
     if (!drifting) {
       const v = Math.abs(vForward);
       const peak = TUNING.kart.turnSpeedPeak;
-      const speedFactor = v < peak ? v / peak : 1 / (1 + (v - peak) * HIGH_SPEED_TURN_FALLOFF);
-      kart.heading += steer * TUNING.kart.turnRate * speedFactor * Math.sign(vForward) * dt;
+      let speedFactor = v < peak ? v / peak : 1 / (1 + (v - peak) * HIGH_SPEED_TURN_FALLOFF);
+      if (Math.abs(throttle) > 0.05) {
+        speedFactor = Math.max(speedFactor, LOW_SPEED_TURN_FLOOR * Math.abs(throttle));
+      }
+      // Direction of travel flips the steering (reversing), but never
+      // cancels it outright at v ~ 0 (sign(0) would deadlock the kart).
+      const travelDir = Math.abs(vForward) > 0.5 ? Math.sign(vForward) : throttle >= 0 ? 1 : -1;
+      kart.heading += steer * TUNING.kart.turnRate * speedFactor * travelDir * dt;
     }
 
     // (j) Recompose velocity in the (possibly rotated) local frame.

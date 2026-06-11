@@ -96,8 +96,9 @@ function buildRibbon(
     positions.push(l.x, l.y + yOffset, l.z, r.x, r.y + yOffset, r.z);
     colors.push(c.r, c.g, c.b, c.r, c.g, c.b);
     if (i < RIBBON_STEPS) {
+      // Winding chosen so faces point up (+Y).
       const a = i * 2;
-      indices.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      indices.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
     }
   }
   const geo = new THREE.BufferGeometry();
@@ -201,7 +202,7 @@ function buildStartLine(spline: TrackSpline): THREE.Mesh {
         positions.push(p.x, p.y + 0.03, p.z);
         colors.push(col.r, col.g, col.b);
       }
-      indices.push(v, v + 1, v + 2, v + 1, v + 3, v + 2);
+      indices.push(v, v + 2, v + 1, v + 1, v + 2, v + 3);
       v += 4;
     }
   }

@@ -62,6 +62,46 @@ export function offsetLimit(roadHalfWidth: number): number {
   return Math.max(0, Math.min(TUNING.ai.maxLateralOffset, roadHalfWidth - ROAD_EDGE_MARGIN));
 }
 
+/** Max comfortable lateral acceleration of the arcade kart (empirical). */
+const MAX_LATERAL_ACCEL = 14;
+/** Planning deceleration: braking + drag, slightly conservative. */
+const PLANNING_DECEL = 16;
+/** Slowest the AI will ever plan to go through a corner. */
+const MIN_CORNER_SPEED = 9;
+/** Length of each curvature window examined ahead (meters). */
+const WINDOW_LENGTH = 12;
+const WINDOW_COUNT = 5;
+
+function headingAt(track: ITrackQuery, d: number): number {
+  const s = track.sampleAtDistance(d);
+  return Math.atan2(s.forward.x, s.forward.z);
+}
+
+/**
+ * Speed the kart may carry RIGHT NOW so that every upcoming corner (next
+ * ~60 m) stays within MAX_LATERAL_ACCEL, given it can shed speed at
+ * PLANNING_DECEL on the way there. This is what makes the AI brake *before*
+ * the hairpin instead of sailing into the grass.
+ */
+export function cornerSpeedLimit(track: ITrackQuery, fromDistance: number): number {
+  let allowed = Infinity;
+  let prevHeading = headingAt(track, fromDistance);
+  for (let i = 1; i <= WINDOW_COUNT; i++) {
+    const ahead = i * WINDOW_LENGTH;
+    const h = headingAt(track, fromDistance + ahead);
+    const turn = Math.abs(angleDiff(h, prevHeading));
+    prevHeading = h;
+    const kappa = turn / WINDOW_LENGTH;
+    if (kappa < 1e-4) continue;
+    const vCorner = Math.max(MIN_CORNER_SPEED, Math.sqrt(MAX_LATERAL_ACCEL / kappa));
+    // Brake-distance relaxation: the corner starts one window away at least.
+    const runway = Math.max(0, ahead - WINDOW_LENGTH);
+    const vNow = Math.sqrt(vCorner * vCorner + 2 * PLANNING_DECEL * runway);
+    allowed = Math.min(allowed, vNow);
+  }
+  return allowed;
+}
+
 // Scratch vectors (module-level, reused every call: no per-tick allocation).
 const scratchPos = new THREE.Vector3();
 const scratchRight = new THREE.Vector3();

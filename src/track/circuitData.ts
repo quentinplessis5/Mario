@@ -18,7 +18,8 @@ export interface ControlPoint {
 }
 
 export const CONTROL_POINTS: ControlPoint[] = [
-  { x: 0, y: 0, z: -15, halfWidth: 7 }, // start line lives at distance 0
+  // Start line lives at distance 0 (first point), in the middle of the main
+  // straight so the starting grid behind it is dead straight.
   { x: 0, y: 0, z: 40, halfWidth: 7 },
   { x: 10, y: 0, z: 72, halfWidth: 7 },
   { x: 38, y: 0, z: 95, halfWidth: 7 },
@@ -26,11 +27,11 @@ export const CONTROL_POINTS: ControlPoint[] = [
   { x: 102, y: 1.5, z: 84, halfWidth: 6.5 },
   { x: 116, y: 2.5, z: 54, halfWidth: 6.5 },
   { x: 110, y: 3.5, z: 24, halfWidth: 6.5 },
-  { x: 124, y: 4.5, z: -6, halfWidth: 6 }, // S-section, climbing
-  { x: 104, y: 5.5, z: -36, halfWidth: 6 },
-  { x: 120, y: 6, z: -66, halfWidth: 6 }, // hilltop
-  { x: 110, y: 5.5, z: -94, halfWidth: 6 },
-  { x: 88, y: 5, z: -110, halfWidth: 6.5 }, // hairpin apex
+  { x: 117, y: 4.5, z: -6, halfWidth: 6.5 }, // S-section, climbing
+  { x: 107, y: 5.5, z: -36, halfWidth: 6.5 },
+  { x: 114, y: 6, z: -66, halfWidth: 6.5 }, // hilltop
+  { x: 106, y: 5.5, z: -90, halfWidth: 6 },
+  { x: 88, y: 5, z: -104, halfWidth: 6.5 }, // hairpin apex
   { x: 72, y: 4.5, z: -96, halfWidth: 6.5 },
   { x: 66, y: 4, z: -76, halfWidth: 6.5 },
   { x: 48, y: 3, z: -64, halfWidth: 6.5 },
@@ -39,6 +40,7 @@ export const CONTROL_POINTS: ControlPoint[] = [
   { x: -24, y: 0.5, z: -96, halfWidth: 7 },
   { x: -34, y: 0, z: -76, halfWidth: 7 }, // final corner
   { x: -22, y: 0, z: -52, halfWidth: 7 },
+  { x: 0, y: 0, z: -15, halfWidth: 7 }, // onto the main straight
 ];
 
 export const CHECKPOINT_COUNT = 14;
